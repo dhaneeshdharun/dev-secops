@@ -1,0 +1,871 @@
+
+# ============================================================
+# 00-namespace.yaml
+# APPLY THIS FIRST — 他の全マニフェストより先に適用
+# ============================================================
+#
+# 【ENGLISH】
+# Namespace = a virtual cluster inside your real cluster.
+# It isolates resources so staging and production never mix.
+# Every resource (Deployment, Service, etc.) must specify
+# its namespace in metadata.namespace.
+#
+# 【日本語】
+# Namespace = クラスター内の仮想クラスター。
+# リソースを分離し、staging と production が混在しないようにする。
+# 全てのリソース（Deployment、Service など）は
+# metadata.namespace で名前空間を指定する必要があります。
+#
+# Apply: kubectl apply -f 00-namespace.yaml
+# Check: kubectl get namespaces
+# ============================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    env: production
+    managed-by: kubectl
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    env: staging
+    managed-by: kubectl
+EOF
+
+cat > /home/claude/k8s-complete/01-configmap.yaml << 'EOF'
+# ============================================================
+# 01-configmap.yaml
+# Non-sensitive configuration / 機密でない設定値
+# ============================================================
+#
+# 【ENGLISH】
+# ConfigMap stores plain text configuration (env vars, config files).
+# Inject into pods so you never need to rebuild the Docker image
+# just to change a config value.
+# Rule: NEVER store passwords or API keys in a ConfigMap.
+# Use Secret (02-secret.yaml) for sensitive data.
+#
+# 【日本語】
+# ConfigMap はプレーンテキストの設定（環境変数、設定ファイル）を保存。
+# Pod に注入することで、設定値を変えるためだけに
+# Docker イメージを再ビルドする必要がなくなります。
+# ルール：パスワードや API キーを ConfigMap に保存しないこと。
+# 機密データは Secret（02-secret.yaml）を使用。
+#
+# Apply: kubectl apply -f 01-configmap.yaml
+# Check: kubectl get configmap -n production
+#        kubectl describe configmap my-app-config -n production
+# ============================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-app-config
+  namespace: production
+  labels:
+    app: my-app
+    env: production
+data:
+  # ── アプリの環境変数をここに追加 / Add your app env vars here ──
+  APP_ENV: "production"
+  LOG_LEVEL: "info"
+  PORT: "8080"
+  # DB_HOST: "mydb.rds.ap-northeast-1.amazonaws.com"
+  # AWS_REGION: "ap-northeast-1"
+  # FEATURE_FLAG_NEW_UI: "true"
+EOF
+
+cat > /home/claude/k8s-complete/02-secret.yaml << 'EOF'
+# ============================================================
+# 02-secret.yaml
+# Sensitive data / 機密データ
+# ============================================================
+#
+# 【ENGLISH】
+# Secret stores sensitive data (passwords, tokens, keys).
+# Values MUST be base64 encoded — not encrypted, just encoded.
+# To encode:  echo -n "mypassword" | base64
+# To decode:  echo "bXlwYXNzd29yZA==" | base64 --decode
+#
+# IMPORTANT for production / EKS:
+# Never commit raw Secret values to Git.
+# Use AWS Secrets Manager + External Secrets Operator instead.
+# This file shows the structure — replace placeholder values.
+#
+# 【日本語】
+# Secret は機密データ（パスワード、トークン、キー）を保存。
+# 値は base64 エンコードが必須（暗号化ではなくエンコード）。
+# エンコード方法: echo -n "mypassword" | base64
+# デコード方法:   echo "bXlwYXNzd29yZA==" | base64 --decode
+#
+# 本番/EKS での重要注意:
+# 生のSecret値をGitにコミットしないこと。
+# 代わりに AWS Secrets Manager + External Secrets Operator を使う。
+#
+# Apply: kubectl apply -f 02-secret.yaml
+# Check: kubectl get secret -n production
+#        kubectl describe secret my-app-secrets -n production
+# ============================================================
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-app-secrets
+  namespace: production
+  labels:
+    app: my-app
+type: Opaque
+data:
+  # base64でエンコードした値を入れる / Put base64 encoded values
+  # echo -n "your-actual-password" | base64
+  DB_PASSWORD: eW91ci1kYi1wYXNzd29yZA==
+  API_KEY: eW91ci1hcGkta2V5
+  JWT_SECRET: eW91ci1qd3Qtc2VjcmV0
+EOF
+
+cat > /home/claude/k8s-complete/03-rbac.yaml << 'EOF'
+# ============================================================
+# 03-rbac.yaml
+# Role-Based Access Control / ロールベースのアクセス制御
+# ============================================================
+#
+# 【ENGLISH】
+# RBAC controls WHO can do WHAT on WHICH resources.
+#
+# 4 objects you need to know:
+#
+# ServiceAccount = identity that a Pod runs as.
+#   Like an IAM role for your pod inside Kubernetes.
+#   On EKS, annotate with IAM Role ARN → pod can access AWS
+#   services (S3, SQS, DynamoDB) without hardcoded credentials.
+#   This is called IRSA (IAM Roles for Service Accounts).
+#
+# Role = list of allowed actions, scoped to ONE namespace.
+#   apiGroups + resources + verbs define what's allowed.
+#
+# ClusterRole = same as Role but applies to ALL namespaces.
+#
+# RoleBinding = assigns a Role to a User/Group/ServiceAccount.
+#
+# Verbs reference:
+#   get, list, watch  → read-only
+#   create, update, patch → write
+#   delete            → delete
+#
+# 【日本語】
+# RBAC は「誰が」「何のリソースに」「何をできるか」を制御する。
+#
+# 知っておくべき4つのオブジェクト:
+#
+# ServiceAccount = Pod が使うアイデンティティ（身分証明）。
+#   Kubernetes 内の Pod 用 IAM ロールのようなもの。
+#   EKS では IAM Role ARN をアノテーションに付ける →
+#   Pod がハードコードされた認証情報なしに AWS サービスにアクセス可能。
+#   これを IRSA（IAM Roles for Service Accounts）と呼ぶ。
+#
+# Role = 許可されたアクションのリスト。1つのNamespaceにスコープされる。
+#
+# ClusterRole = Role と同じだが全 Namespace に適用される。
+#
+# RoleBinding = Role をユーザー/グループ/ServiceAccount に割り当てる。
+#
+# Apply: kubectl apply -f 03-rbac.yaml
+# Check: kubectl get serviceaccount -n production
+#        kubectl get role -n production
+#        kubectl get rolebinding -n production
+#        kubectl auth can-i list pods --as=system:serviceaccount:production:my-app-sa -n production
+# ============================================================
+
+# ── 1. ServiceAccount (Pod のアイデンティティ / Pod identity) ──────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-app-sa
+  namespace: production
+  labels:
+    app: my-app
+  annotations:
+    # IRSA: AWS リソースへのアクセスに使う IAM Role ARN を指定
+    # IRSA: specify IAM Role ARN for AWS resource access
+    # Replace with your actual ARN:
+    eks.amazonaws.com/role-arn: arn:aws:iam::YOUR_ACCOUNT_ID:role/my-app-eks-role
+
+---
+# ── 2. Role (production namespace 内で許可する操作 / Allowed actions) ──────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: my-app-role
+  namespace: production
+  labels:
+    app: my-app
+rules:
+  # Pod が ConfigMap と Secret を読み取れる（起動時の設定読み込みに必要）
+  # Pods can read ConfigMaps and Secrets (needed to load config at runtime)
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  # Pod が自分自身の情報を取得できる
+  # Pods can read their own pod info
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+
+---
+# ── 3. RoleBinding (ServiceAccount に Role を割り当てる / Assign role) ──────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: my-app-rolebinding
+  namespace: production
+  labels:
+    app: my-app
+subjects:
+  - kind: ServiceAccount
+    name: my-app-sa
+    namespace: production
+roleRef:
+  kind: Role
+  name: my-app-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ── 4. Developer Role (チーム用の読み取り専用 / Team read-only) ─────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: developer-readonly
+  namespace: production
+rules:
+  - apiGroups: ["", "apps"]
+    resources: ["pods", "deployments", "services", "configmaps", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  # kubectl logs を許可 / Allow kubectl logs
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+
+---
+# ── 5. Developer RoleBinding ────────────────────────────────────────────────
+# aws-auth ConfigMap でマッピングされた IAM ユーザー/ロール名に変更
+# Replace with IAM user/role name mapped in aws-auth ConfigMap
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: developer-readonly-binding
+  namespace: production
+subjects:
+  - kind: User
+    name: "developer@company.com"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: developer-readonly
+  apiGroup: rbac.authorization.k8s.io
+EOF
+
+cat > /home/claude/k8s-complete/04-replicaset.yaml << 'EOF'
+# ============================================================
+# 04-replicaset.yaml
+# ReplicaSet — Pod 数を常に維持するコントローラー
+# ReplicaSet — Controller that always maintains pod count
+# ============================================================
+#
+# 【ENGLISH — DEEP EXPLANATION】
+#
+# WHAT IS A REPLICASET?
+# ReplicaSet has ONE job:
+#   "Always keep exactly N pods matching my selector running."
+#
+# It runs a continuous reconciliation loop:
+#   actual pods < desired → CREATE new pods immediately
+#   actual pods > desired → DELETE extra pods immediately
+#   actual pods = desired → do nothing
+#
+# HOW IT FINDS PODS — LABEL SELECTOR:
+# ReplicaSet does NOT own pods by name or UUID.
+# It owns pods by LABEL MATCHING only.
+#   → Any pod with label app=my-app is "owned" by this RS
+#   → Remove the label from a pod → RS immediately creates a replacement
+#   → Manually add a pod with same label → RS may delete one of its own!
+#
+# REPLICASET vs DEPLOYMENT:
+# In practice, never create a standalone ReplicaSet.
+# Always use Deployment (which manages ReplicaSets for you).
+# This file exists for LEARNING — to understand what Deployment
+# creates under the hood when you apply 05-deployment.yaml.
+#
+# 【日本語 — 詳細説明】
+#
+# ReplicaSet の仕事は1つ：
+#   「セレクターに一致する Pod が常に N 個動いていることを保証する」
+#
+# 常に調整ループを実行：
+#   実際の Pod 数 < 望む数 → 即座に新 Pod を作成
+#   実際の Pod 数 > 望む数 → 余分な Pod を即座に削除
+#   実際の Pod 数 = 望む数 → 何もしない
+#
+# ラベルセレクターについて：
+# ReplicaSet は名前や UUID で Pod を管理しない。
+# 純粋にラベルの一致で管理する。
+#   → app=my-app ラベルを持つ Pod は全てこの RS の「所有」
+#   → Pod からラベルを外す → RS は即座に代わりを作成
+#   → 同じラベルの Pod を手動作成 → RS は自分の Pod を削除するかも！
+#
+# ReplicaSet vs Deployment：
+# 実際には単独の ReplicaSet を作ることはほぼない。
+# 常に Deployment を使う（Deployment が ReplicaSet を管理する）。
+# このファイルは学習用 — 05-deployment.yaml を適用したときに
+# Kubernetes が裏側で何を作るかを理解するために存在する。
+#
+# Apply: kubectl apply -f 04-replicaset.yaml
+# Check: kubectl get replicaset -n production
+#        kubectl describe replicaset my-app-replicaset -n production
+# Scale: kubectl scale replicaset my-app-replicaset --replicas=5 -n production
+# Self-healing test: kubectl delete pod <pod-name> -n production
+#                    kubectl get pods -n production -w  (watch it come back)
+# ============================================================
+
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: my-app-replicaset
+  namespace: production
+  labels:
+    app: my-app
+    tier: backend
+    managed-by: manual
+spec:
+  # 常にこの数の Pod を維持 / Always maintain this number of pods
+  replicas: 3
+
+  # このラベルを持つ Pod を管理対象とする
+  # Manage pods that have this exact label
+  selector:
+    matchLabels:
+      app: my-app   # ← template.metadata.labels と一致させること
+
+  # Pod の設計図 / Blueprint for each pod
+  template:
+    metadata:
+      labels:
+        app: my-app       # ← selector.matchLabels と必ず一致させること
+        tier: backend
+        version: "1.0.0"
+    spec:
+      serviceAccountName: my-app-sa
+      containers:
+        - name: my-app
+          # !! ECR URI に変更 / Replace with your ECR URI !!
+          image: YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com/my-app:v1.0.0
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: my-app-config
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+EOF
+
+cat > /home/claude/k8s-complete/05-deployment.yaml << 'EOF'
+# ============================================================
+# 05-deployment.yaml
+# Deployment — ReplicaSet を管理し、ローリングアップデートを行う
+# Deployment — Manages ReplicaSets and performs rolling updates
+# ============================================================
+#
+# 【ENGLISH — DEEP EXPLANATION】
+#
+# OBJECT HIERARCHY:
+#   You write   → Deployment
+#   Creates     → ReplicaSet  (you never write this manually)
+#   Creates     → Pods        (you never write these manually)
+#
+# WHAT DEPLOYMENT ADDS OVER REPLICASET:
+#   1. Rolling Update: replace pods gradually, zero downtime
+#   2. Rollback: kubectl rollout undo → reverts to previous ReplicaSet
+#   3. Revision History: keeps old ReplicaSets for rollback
+#   4. Pause/Resume: pause a rolling update mid-way
+#
+# ROLLING UPDATE — HOW IT WORKS STEP BY STEP:
+#   When you change the image tag:
+#   Step 1: New ReplicaSet (RS-v2) created with replicas=0
+#   Step 2: RS-v2 scaled UP by 1 → new pod starts, pulls new image
+#   Step 3: Wait for new pod to PASS readinessProbe
+#   Step 4: RS-v1 (old) scaled DOWN by 1 → old pod terminated gracefully
+#   Step 5: Repeat steps 2-4 until RS-v2 = full replicas, RS-v1 = 0
+#   Step 6: RS-v1 stays at 0 pods — preserved for rollback!
+#
+# KEY PARAMETERS:
+#   maxSurge: 1       → allow 1 extra pod during update (3+1=4 max)
+#   maxUnavailable: 0 → never reduce below desired count (safest)
+#
+# readinessProbe IS THE GATEKEEPER:
+#   The rolling update PAUSES if the new pod fails readinessProbe.
+#   Old pods stay running. Nothing breaks.
+#   Fix your app → readiness passes → update resumes automatically.
+#
+# 【日本語 — 詳細説明】
+#
+# オブジェクト階層：
+#   あなたが書く → Deployment
+#   作成する     → ReplicaSet（手動では書かない）
+#   作成する     → Pod（手動では書かない）
+#
+# Deployment が ReplicaSet に追加するもの：
+#   1. ローリングアップデート：Pod を少しずつ入れ替え、ゼロダウンタイム
+#   2. ロールバック：kubectl rollout undo → 前の ReplicaSet に戻す
+#   3. リビジョン履歴：ロールバック用に古い ReplicaSet を保持
+#   4. 一時停止/再開：ローリングアップデートを途中で止められる
+#
+# ローリングアップデートの仕組み（ステップごと）：
+#   イメージタグを変更すると：
+#   Step 1: 新 ReplicaSet (RS-v2) が replicas=0 で作成される
+#   Step 2: RS-v2 が 1 にスケールアップ → 新 Pod 起動、新イメージをプル
+#   Step 3: 新 Pod が readinessProbe を通過するまで待機
+#   Step 4: RS-v1（古い）が 1 にスケールダウン → 古 Pod がグレースフルに終了
+#   Step 5: RS-v2 = 全レプリカ、RS-v1 = 0 になるまで Step 2-4 を繰り返す
+#   Step 6: RS-v1 は 0 Pod で残存 → ロールバック用に保持！
+#
+# キーパラメーター：
+#   maxSurge: 1       → 更新中に 1 Pod 余分に許容（最大 3+1=4）
+#   maxUnavailable: 0 → desired 数を下回らない（最も安全）
+#
+# readinessProbe はゲートキーパー：
+#   新 Pod が readinessProbe に失敗すると、ローリングアップデートは一時停止。
+#   古い Pod はそのまま動き続ける。何も壊れない。
+#   アプリを修正 → readiness が通過 → 自動的に更新が再開する。
+#
+# Apply:   kubectl apply -f 05-deployment.yaml
+# Update image (trigger rolling update):
+#          kubectl set image deployment/my-app my-app=ECR_URI:v2.0.0 -n production
+# Watch:   kubectl rollout status deployment/my-app -n production
+# History: kubectl rollout history deployment/my-app -n production
+# Rollback: kubectl rollout undo deployment/my-app -n production
+# Rollback to specific version: kubectl rollout undo deployment/my-app --to-revision=1 -n production
+# ============================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: production
+  labels:
+    app: my-app
+    env: production
+  annotations:
+    # ロールバック時に変更理由を記録 / Record change reason for rollback history
+    kubernetes.io/change-cause: "Initial deployment v1.0.0"
+
+spec:
+  replicas: 3
+
+  selector:
+    matchLabels:
+      app: my-app
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # ローリングアップデート戦略 / Rolling Update Strategy
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # 更新中に許容する余分な Pod 数
+      maxUnavailable: 0  # 更新中に使用不可を許容する Pod 数（0=常に full capacity）
+
+  # ロールバック用に保持する古い ReplicaSet の数
+  # Number of old ReplicaSets to keep for rollback
+  revisionHistoryLimit: 5
+
+  template:
+    metadata:
+      labels:
+        app: my-app
+        version: "1.0.0"
+    spec:
+      serviceAccountName: my-app-sa
+
+      # グレースフルシャットダウン猶予時間（進行中リクエストを完了させる）
+      # Grace period to finish in-flight requests before pod is force-killed
+      terminationGracePeriodSeconds: 60
+
+      containers:
+        - name: my-app
+          # !! ECR URI に変更 / Replace with your ECR URI !!
+          image: YOUR_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com/my-app:v1.0.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+
+          # ConfigMap から全キーを環境変数として注入
+          # Inject all keys from ConfigMap as environment variables
+          envFrom:
+            - configMapRef:
+                name: my-app-config
+
+          # Secret から個別の環境変数を注入
+          # Inject individual env vars from Secret
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: my-app-secrets
+                  key: DB_PASSWORD
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: my-app-secrets
+                  key: API_KEY
+
+          resources:
+            requests:
+              cpu: "100m"     # 0.1 CPU を保証 / Guaranteed 0.1 CPU
+              memory: "128Mi"
+            limits:
+              cpu: "500m"     # 最大 0.5 CPU / Max 0.5 CPU
+              memory: "512Mi"
+
+          # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          # Readiness Probe — ローリングアップデートのゲートキーパー
+          # Readiness Probe — gatekeeper for rolling updates
+          # FAIL → Service からルーティングを外す、更新を一時停止
+          # FAIL → removed from Service, rolling update pauses
+          # PASS → Service にルーティング再開、次の Pod 入れ替えへ進む
+          # PASS → re-added to Service, rolling update proceeds
+          # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          readinessProbe:
+            httpGet:
+              path: /ready   # アプリのエンドポイントに合わせて変更
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            successThreshold: 2   # 2回連続成功でReady
+            failureThreshold: 3   # 3回連続失敗でNotReady
+            timeoutSeconds: 3
+
+          # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          # Liveness Probe — 死んだ Pod を自動再起動
+          # Liveness Probe — auto-restart dead pods
+          # FAIL → Pod を強制再起動（コンテナが再起動される）
+          # FAIL → Pod is force-restarted (container restarts)
+          # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30   # readiness より長く待つ
+            periodSeconds: 20
+            failureThreshold: 3
+
+          # Pod 終了前の後処理 / Pre-termination cleanup
+          # Service が新リクエストの転送を止めるまでの猶予
+          # Gives Service time to stop routing new requests here
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 15"]
+
+      # 全 Pod を異なるアベイラビリティゾーンに分散
+      # Spread pods across different Availability Zones
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: my-app
+EOF
+
+cat > /home/claude/k8s-complete/06-service.yaml << 'EOF'
+# ============================================================
+# 06-service.yaml
+# Service — Pod への安定したネットワークアクセスを提供
+# Service — Provides stable network access to pods
+# ============================================================
+#
+# 【ENGLISH】
+# Pods are ephemeral — they die and come back with new IP addresses.
+# A Service gives a STABLE IP + DNS name that never changes.
+#
+# Service finds its pods by LABEL SELECTOR (same concept as ReplicaSet).
+# It load-balances traffic across all matching pods automatically.
+#
+# Traffic flow:
+#   Internet → Ingress → Service (port 80) → Pod (port 8080)
+#
+# Service Types:
+#   ClusterIP    = internal only, reachable only within cluster (default)
+#   NodePort     = exposed on each node's IP at a static port
+#   LoadBalancer = creates AWS NLB/ALB (expensive, one per service)
+#   ExternalName = maps to external DNS name
+#
+# Best practice on EKS: use ClusterIP + Ingress (07-ingress.yaml)
+# One Ingress = one ALB = routes all apps by path/hostname = cheaper
+#
+# 【日本語】
+# Pod は一時的 — 死んでも新しい IP アドレスで復活する。
+# Service は変わらない安定した IP + DNS 名を提供する。
+#
+# Service はラベルセレクターで Pod を見つける（ReplicaSet と同じ概念）。
+# 一致する全ての Pod に自動的にトラフィックを負荷分散する。
+#
+# トラフィックの流れ：
+#   インターネット → Ingress → Service (port 80) → Pod (port 8080)
+#
+# Service タイプ：
+#   ClusterIP    = クラスター内部のみ（デフォルト）
+#   NodePort     = 各ノードの IP で静的ポートを公開
+#   LoadBalancer = AWS NLB/ALB を作成（高コスト、Service ごとに 1つ）
+#   ExternalName = 外部 DNS 名にマッピング
+#
+# EKS でのベストプラクティス: ClusterIP + Ingress を使う
+# Ingress 1つ = ALB 1つ = パス/ホスト名で全アプリにルーティング = コスト削減
+#
+# Apply: kubectl apply -f 06-service.yaml
+# Check: kubectl get service -n production
+#        kubectl describe service my-app-svc -n production
+# Test:  kubectl port-forward service/my-app-svc 8080:80 -n production
+# ============================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-svc
+  namespace: production
+  labels:
+    app: my-app
+    env: production
+spec:
+  # このラベルを持つ Pod にトラフィックを転送
+  # Forward traffic to pods that have this label
+  selector:
+    app: my-app   # Deployment の template.labels と一致させること
+
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80          # Service が受け付けるポート（クラスター内）
+      targetPort: 8080  # Pod の実際のポート（containerPort と同じ）
+
+  # ClusterIP = クラスター内部のみ。Ingress が外部アクセスを担当。
+  # ClusterIP = internal only. Ingress handles external access.
+  type: ClusterIP
+EOF
+
+cat > /home/claude/k8s-complete/07-ingress.yaml << 'EOF'
+# ============================================================
+# 07-ingress.yaml
+# Ingress — 外部トラフィックの単一エントリーポイント
+# Ingress — Single entry point for all external HTTP/S traffic
+# ============================================================
+#
+# 【ENGLISH】
+# Ingress = the front door for your cluster.
+# One AWS ALB routes ALL your apps based on hostname or URL path.
+#
+# Without Ingress: each Service needs its own LoadBalancer = 1 ALB per app
+# With Ingress:    one ALB for everything = cheaper, easier to manage
+#
+# Requires: AWS Load Balancer Controller installed on EKS.
+# Install guide: https://docs.aws.amazon.com/eks/latest/userguide/aws-load-balancer-controller.html
+#
+# Key annotations for EKS ALB:
+#   alb.ingress.kubernetes.io/scheme: internet-facing → public ALB
+#   alb.ingress.kubernetes.io/target-type: ip → routes to pod IPs directly (faster)
+#   alb.ingress.kubernetes.io/certificate-arn → HTTPS with ACM certificate
+#
+# 【日本語】
+# Ingress = クラスターの玄関口。
+# 1つの AWS ALB がホスト名または URL パスで全アプリにルーティング。
+#
+# Ingress なし: 各 Service が独自の LoadBalancer を必要とする = アプリごとに 1 ALB
+# Ingress あり: 全アプリに対して 1つの ALB = コスト削減、管理が簡単
+#
+# 必要なもの: EKS に AWS Load Balancer Controller のインストール
+#
+# EKS ALB の主要アノテーション：
+#   alb.ingress.kubernetes.io/scheme: internet-facing → 公開 ALB
+#   alb.ingress.kubernetes.io/target-type: ip → Pod IP に直接ルーティング（高速）
+#   alb.ingress.kubernetes.io/certificate-arn → ACM 証明書で HTTPS
+#
+# Apply: kubectl apply -f 07-ingress.yaml
+# Check: kubectl get ingress -n production
+#        kubectl describe ingress my-app-ingress -n production
+# ============================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-app-ingress
+  namespace: production
+  labels:
+    app: my-app
+  annotations:
+    # AWS ALB Ingress Controller を使用
+    kubernetes.io/ingress.class: alb
+
+    # internet-facing = インターネットからアクセス可能
+    # internal = VPC 内からのみアクセス可能
+    alb.ingress.kubernetes.io/scheme: internet-facing
+
+    # ip モード = Pod IP に直接ルーティング（推奨）
+    alb.ingress.kubernetes.io/target-type: ip
+
+    # ヘルスチェックパス（アプリのエンドポイントに合わせて変更）
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+
+    # HTTPS を有効にする場合（ACM 証明書の ARN を指定）
+    # Uncomment to enable HTTPS with ACM certificate:
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:REGION:ACCOUNT_ID:certificate/CERT-ID
+    # alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    # alb.ingress.kubernetes.io/ssl-redirect: '443'
+
+spec:
+  rules:
+    # !! ドメイン名に変更 / Replace with your actual domain !!
+    - host: api.yourdomain.com
+      http:
+        paths:
+          # 全トラフィックを my-app-svc に転送
+          # Route all traffic to my-app-svc
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: my-app-svc
+                port:
+                  number: 80
+
+          # 複数サービスへのルーティング例 / Example multi-service routing:
+          # - path: /api
+          #   pathType: Prefix
+          #   backend:
+          #     service:
+          #       name: api-svc
+          #       port:
+          #         number: 80
+          # - path: /auth
+          #   pathType: Prefix
+          #   backend:
+          #     service:
+          #       name: auth-svc
+          #       port:
+          #         number: 80
+EOF
+
+cat > /home/claude/k8s-complete/08-hpa.yaml << 'EOF'
+# ============================================================
+# 08-hpa.yaml
+# HorizontalPodAutoscaler — 自動スケーリング
+# HorizontalPodAutoscaler — Automatic pod scaling
+# ============================================================
+#
+# 【ENGLISH】
+# HPA watches CPU/memory usage and automatically:
+#   - Scales UP   (adds pods)   when load is high
+#   - Scales DOWN (removes pods) when load is low
+#
+# HPA works by adjusting Deployment.spec.replicas automatically.
+# Do NOT manually change replicas in your Deployment when HPA is active
+# — HPA will override it anyway.
+#
+# HPA decision formula:
+#   desiredReplicas = ceil(currentReplicas × (currentMetric / targetMetric))
+#   Example: 3 pods × (90% CPU / 70% target) = ceil(3.857) = 4 pods
+#
+# Requires: metrics-server installed on EKS
+# Install: kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+#
+# 【日本語】
+# HPA は CPU/メモリ使用率を監視して自動的に：
+#   - スケールアップ（Pod を追加）負荷が高いとき
+#   - スケールダウン（Pod を削除）負荷が低いとき
+#
+# HPA は Deployment.spec.replicas を自動的に調整する仕組み。
+# HPA が有効なとき Deployment の replicas を手動変更しないこと
+# — HPA が上書きするので意味がない。
+#
+# HPA の計算式：
+#   望む Pod 数 = ceil(現在の Pod 数 × (現在のメトリクス / 目標メトリクス))
+#   例: 3 Pod × (90% CPU / 70% 目標) = ceil(3.857) = 4 Pod
+#
+# 必要なもの: EKS に metrics-server のインストール
+# インストール: kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+#
+# Apply: kubectl apply -f 08-hpa.yaml
+# Check: kubectl get hpa -n production
+#        kubectl describe hpa my-app-hpa -n production
+# Watch: kubectl get hpa -n production -w
+# ============================================================
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: my-app-hpa
+  namespace: production
+  labels:
+    app: my-app
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-app   # 05-deployment.yaml の name と一致させること
+
+  minReplicas: 3    # 最小 Pod 数（05-deployment.yaml の replicas と合わせる）
+  maxReplicas: 10   # 最大 Pod 数
+
+  metrics:
+    # CPU 使用率でスケール / Scale on CPU usage
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70   # 平均 CPU 70% を超えたらスケールアップ
+
+    # メモリ使用率でスケール（オプション）/ Scale on memory (optional)
+    # - type: Resource
+    #   resource:
+    #     name: memory
+    #     target:
+    #       type: Utilization
+    #       averageUtilization: 80
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60    # スケールアップ後 60秒は再スケールアップしない
+      policies:
+        - type: Pods
+          value: 2                       # 1回のスケールイベントで最大 2 Pod 追加
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300   # スケールダウン前に 5分間待つ（過剰反応防止）
+      policies:
+        - type: Pods
+          value: 1                       # 1回のスケールイベントで最大 1 Pod 削除
+          periodSeconds: 60
+EOF
+
+echo "All files created:"
+ls -1 /home/claude/k8s-complete/
+Done
+
+You are out of free messages until 8:40 PM

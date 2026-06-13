@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-configmap
+  namespace: production
+  labels:
+    app: iboats
+    env: prod
+data:
+  PORT: "8080"
+  APP_ENV: "production"
+  

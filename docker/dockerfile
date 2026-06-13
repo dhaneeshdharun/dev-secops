@@ -1,0 +1,10 @@
+FROM tomcat:latest
+
+LABEL maintainer="dhaneesh"
+LABEL email="dhaneeshjadhav@gmail.com"
+LABEL description="This is a docker image for tomcat server"
+
+WORKDIR /usr/local/tomcat/webapps
+COPY tomcat.html /usr/local/tomcat/webapps/ROOT/index.html
+EXPOSE 8080
+CMD ["catalina.sh", "run"]

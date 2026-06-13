@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-deployment
+  namespace: production
+  labels:
+    app: iboats
+    env: prod
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: iboats
+      env: prod
+  template:
+    metadata:
+      labels:
+        app: iboats
+        env: prod
+    spec:
+      serviceAccountName: app-serviceaccount
+      containers:
+      - name: iboats-container
+        image: 311414082845.dkr.ecr.ap-northeast-1.amazonaws.com/nec-ecr-repository:latest
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: app-configmap
+        resources:
+          limits:
+            memory: "3000Mi"
+            cpu: "1500m"
+          requests:
+            memory: "1500Mi"
+            cpu: "600m"
