@@ -18,14 +18,14 @@ resource "aws_eks_node_group" "eks-node-group" {
   node_role_arn = aws_iam_role.node_iam_role.arn
   subnet_ids = [aws_subnet.private-subnet1.id, aws_subnet.private-subnet2.id]
   scaling_config {
-    desired_size = 2
+    desired_size = 3
     max_size = 8
-    min_size = 1
+    min_size = 2
     }
-    launch_template {
-    id = aws_launch_template.nec-launchtemplate-1.id
-    version = "1"
+#    launch_template {
+#    id = aws_launch_template.nec-launchtemplate-1.id
+#    version = "$Latest"
     
-  }
+ # }
   depends_on = [ aws_iam_role_policy_attachment.nodepolicy, aws_iam_role_policy_attachment.cnipolicy, aws_iam_role_policy_attachment.ecrpolicy]
 }
