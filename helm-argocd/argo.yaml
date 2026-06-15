@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: my-argo-app # The name of this ArgoCD Application. You'll see this name in the ArgoCD UI.
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dhaneeshdharun/dev-secops.git
+    targetRevision: dev-staging
+    path: helm-argocd
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: my-argo-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
