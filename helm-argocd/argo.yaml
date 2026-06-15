@@ -1,14 +1,14 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: ArgoCD
-  namespace: argocd
+  name: argocd
+  namespace: argo-cd
 spec:
   project: default  
   source:
     repoURL: https://github.com/dhaneeshdharun/dev-secops.git
     targetRevision: dev-staging
-    path: helm-arogcd
+    path: helm-argocd
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
@@ -16,3 +16,5 @@ spec:
     automated:
       prune: true
       selfHeal: true
+  syncOptions:
+    - CreateNamespace=true
